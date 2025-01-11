@@ -81,14 +81,14 @@ from pubmedllm.rag_system import PubmedLLM
 pubmed_llm = PubmedLLM()
 
 # Download papers about rheumatoid arthritis
-query = "((rheumatoid arthritis) AND gene) AND cell"
+query = "((autoimmune diseases) AND inflammation) AND therapy"
 pubmed_llm.download_and_index_papers(query, max_results=1000)
 ```
 
 3. Query the papers:
 ```python
 # Ask a question about the papers
-result = pubmed_llm.query("Tell me about T cell–derived cytokines in rheumatoid arthritis")
+result = pubmed_llm.query("Explain the role of cytokines in autoimmune diseases")
 print(result['result'])
 ```
 
@@ -96,9 +96,9 @@ print(result['result'])
 
 ```python
 queries = [
-    "Tell me about T cell–derived cytokines in relation to rheumatoid arthritis",
-    "Tell me about single-cell research in rheumatoid arthritis",
-    "Tell me about protein-protein associations in rheumatoid arthritis",
+    "What is the impact of microbiota on immune system modulation?",
+    "How do biologics target specific pathways in psoriasis treatment?",
+    "What are the latest findings on CAR-T cell therapy for cancer?",
 ]
 
 for query in queries:
