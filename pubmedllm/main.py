@@ -16,17 +16,17 @@ def main():
     # Initialize PubmedLLM system
     pubmed_llm = PubmedLLM()
     
-    # Example: Download and index papers about rheumatoid arthritis
-    query = "((rheumatoid arthritis) AND gene) AND cell"
+    # Example: Download and index papers about autoimmune diseases
+    query = "((autoimmune diseases) AND inflammation) AND therapy"
     try:
         num_papers = pubmed_llm.download_and_index_papers(query, max_results=1000)
         print(f"Successfully downloaded and indexed {num_papers} papers")
         
         # Example queries
         queries = [
-            "Tell me about T cell–derived cytokines in relation to rheumatoid arthritis",
-            "Tell me about single-cell research in rheumatoid arthritis",
-            "Tell me about protein-protein associations in rheumatoid arthritis",
+            "What is the impact of microbiota on immune system modulation?",
+            "How do biologics target specific pathways in psoriasis treatment?",
+            "What are the latest findings on CAR-T cell therapy for cancer?",
         ]
         
         # Run queries and display results
