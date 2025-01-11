@@ -177,24 +177,4 @@ To contribute to PubmedLLM:
 python -m pytest tests/
 ```
 
-## License
 
-
-
-## Citation
-
-If you use PubmedLLM in your research, please cite:
-
-```bibtex
-@software{pubmedllm,
-  title = {PubmedLLM},
-  author = {Your Name},
-  year = {2024},
-  url = {https://github.com/yourusername/PubmedLLM}
-}
-```
-
-
-## Contact
-
-[Your contact information]
