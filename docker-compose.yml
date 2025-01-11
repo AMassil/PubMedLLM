@@ -1,0 +1,43 @@
+# docker-compose.yml
+services:
+  postgres:
+    container_name: pubmedllm_db
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: ${DB_USER}        
+      POSTGRES_PASSWORD: ${DB_PASSWORD}  
+      POSTGRES_DB: ${DB_NAME} 
+    ports:
+      - "5432:5432"
+    volumes:
+      - pubmedllm_postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pubmedllm:
+    container_name: pubmedllm_app
+    build: .
+    volumes:
+      - ./data:/app/data
+      - .:/app
+    environment:
+      - DB_USER=${DB_USER}    
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - NCBI_API_KEY=${NCBI_API_KEY}
+      - NCBI_EMAIL=${NCBI_EMAIL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pubmedllm_postgres_data:
