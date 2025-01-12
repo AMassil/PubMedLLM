@@ -20,7 +20,7 @@ PubmedLLM is a powerful tool that combines PubMed paper retrieval with Large Lan
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/PubmedLLM.git
+git clone https://github.com/AMassil/PubmedLLM.git
 cd PubmedLLM
 ```
 
