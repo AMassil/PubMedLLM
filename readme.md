@@ -1,6 +1,6 @@
 # PubmedLLM
 
-PubmedLLM is a powerful tool that combines PubMed paper retrieval with Large Language Models (LLMs) to enable intelligent querying of scientific literature. It uses AWS Bedrock for LLM capabilities and PostgreSQL for vector storage.
+PubmedLLM is a tool that combines PubMed paper retrieval with Large Language Models (LLMs) to enable intelligent querying of scientific literature. It uses AWS Bedrock for LLM capabilities and PostgreSQL for vector storage.
 
 ## Features
 
