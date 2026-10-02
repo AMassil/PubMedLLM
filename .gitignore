@@ -1,5 +1,7 @@
 # Environment variables
 .env
+*.pem
+*key*.csv
 
 # Python
 __pycache__/
@@ -26,10 +28,13 @@ wheels/
 # Virtual Environment
 venv/
 ENV/
+.venv/
+env/
 
 # Data directories
 data/pdfs/*
 data/xml/*
+data/pubget_data/*
 !data/pdfs/.gitkeep
 !data/xml/.gitkeep
 
@@ -39,9 +44,14 @@ postgres_data/
 # IDE specific files
 .idea/
 .vscode/
+.vs/
 *.swp
 *.swo
+
+# Archived pre-refactor project
+PUBmedLLMold/
 
 # OS specific files
 .DS_Store
 Thumbs.db
+desktop.ini

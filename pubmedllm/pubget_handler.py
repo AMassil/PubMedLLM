@@ -1,10 +1,9 @@
 # pubmedllm/pubget_handler.py
-import os
-import subprocess
+import hashlib
 import logging
 from pathlib import Path
 from Bio import Entrez
-from typing import List, Optional
+from typing import Any, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -17,42 +16,63 @@ class PubgetHandler:
             email: Email address for NCBI
             api_key: NCBI API key (optional but recommended)
         """
-        Entrez.email = email
+        self.email = email.strip()
+        Entrez.email = self.email
         if api_key:
             Entrez.api_key = api_key
         
     def download_papers(self, query: str, max_results: int = 10) -> str:
-        output_dir = Path("data/pubget_data")
+        """Download open-access PMC full text without the obsolete pubget CLI."""
+        if not query.strip():
+            raise ValueError("Query must not be empty")
+        if max_results < 1:
+            raise ValueError("max_results must be positive")
+        if not self.email:
+            raise ValueError("NCBI_EMAIL must contain a valid contact email")
+
+        query_id = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+        output_dir = Path("data/pubget_data") / f"query_{query_id}"
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         try:
-            # Run pubget command
-            cmd = [
-                "pubget", "run",
-                "-q", query,
-                "-n", str(max_results),
-                str(output_dir)
-            ]
-            
-            logger.info(f"Running pubget with query: {query}")
-            with open("pubget_log.txt", "w") as log_file:
-                result = subprocess.run(cmd, stdout=log_file, stderr=subprocess.PIPE, text=True)
-            
-            if result.returncode != 0:
-                logger.error(f"Pubget error: {result.stderr}")
-                raise Exception(f"Pubget failed with error: {result.stderr}")
-                
-            logger.info(f"Successfully downloaded papers to {output_dir}")
+            logger.info("Searching PubMed Central: %s", query)
+            with Entrez.esearch(db="pmc", term=query, retmax=max_results) as handle:
+                search_result = cast(dict[str, Any], Entrez.read(handle))
+
+            ids = search_result.get("IdList", [])
+            if not ids:
+                raise RuntimeError("No open-access article found in PubMed Central")
+
+            downloaded = 0
+            for pmcid in ids:
+                article_dir = output_dir / f"pmcid_{pmcid}"
+                destination = article_dir / "article.xml"
+                if destination.exists() and destination.stat().st_size:
+                    downloaded += 1
+                    continue
+                article_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    with Entrez.efetch(db="pmc", id=pmcid, retmode="xml") as handle:
+                        payload = handle.read()
+                    if isinstance(payload, str):
+                        payload = payload.encode("utf-8")
+                    destination.write_bytes(payload)
+                    downloaded += 1
+                except Exception as exc:
+                    logger.warning("Could not download PMC%s: %s", pmcid, exc)
+
+            if downloaded == 0:
+                raise RuntimeError("PMC returned results, but no full text could be downloaded")
+            logger.info("Downloaded %d article(s) to %s", downloaded, output_dir)
             return str(output_dir)
-            
         except Exception as e:
-            logger.error(f"Error downloading papers: {str(e)}")
+            logger.error("Error downloading papers: %s", e)
             raise
 
     def get_paper_metadata(self, pmid: str) -> dict:
         try:
-            handle = Entrez.efetch(db="pubmed", id=pmid, rettype="xml")
-            record = Entrez.read(handle)
+            with Entrez.efetch(db="pubmed", id=pmid, rettype="xml") as handle:
+                record = cast(dict[str, Any], Entrez.read(handle))
             article = record['PubmedArticle'][0]
             
             metadata = {
