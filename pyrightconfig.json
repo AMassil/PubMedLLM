@@ -1,0 +1,4 @@
+{
+  "include": ["pubmedllm", "tests"],
+  "exclude": [".venv", "env", "PUBmedLLMold", ".vs"]
+}

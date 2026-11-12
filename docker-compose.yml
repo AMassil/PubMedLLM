@@ -4,16 +4,16 @@ services:
     container_name: pubmedllm_db
     image: pgvector/pgvector:pg15
     environment:
-      POSTGRES_USER: ${DB_USER}        
-      POSTGRES_PASSWORD: ${DB_PASSWORD}  
-      POSTGRES_DB: ${DB_NAME} 
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pubmedllm}
+      POSTGRES_DB: ${DB_NAME:-pubmedllm}
     ports:
       - "5432:5432"
     volumes:
       - pubmedllm_postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -25,19 +25,22 @@ services:
       - ./data:/app/data
       - .:/app
     environment:
-      - DB_USER=${DB_USER}    
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-pubmedllm}
+      - DB_HOST=postgres
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-pubmedllm}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
       - NCBI_API_KEY=${NCBI_API_KEY}
       - NCBI_EMAIL=${NCBI_EMAIL}
     depends_on:
       postgres:
         condition: service_healthy
+    profiles: ["app"]
 
 volumes:
   pubmedllm_postgres_data:

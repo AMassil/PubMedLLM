@@ -1,8 +1,6 @@
 # pubmedllm/rag_system.py
-import boto3
-from langchain_community.embeddings import BedrockEmbeddings
-from langchain_community.chat_models import BedrockChat
-from langchain_community.vectorstores.pgvector import PGVector
+from langchain_aws import BedrockEmbeddings, ChatBedrockConverse
+from langchain_postgres import PGVector
 from pubmedllm.config import Config
 from pubmedllm.database import Database
 from pubmedllm.document_processor import DocumentProcessor
@@ -11,38 +9,31 @@ import logging
 import os
 import hashlib
 
+logger = logging.getLogger(__name__)
+
 class PubmedLLM:
-    def __init__(self):
-        self.bedrock_client = boto3.client(
-            "bedrock-runtime",
-            region_name=Config.AWS_REGION
+    def __init__(self, embeddings=None, llm=None, vectorstore=None):
+        self.embeddings = embeddings or BedrockEmbeddings(
+            model_id=Config.EMBEDDING_MODEL_ID,
+            region_name=Config.AWS_REGION,
         )
-        
-        self.embeddings = BedrockEmbeddings(
-            model_id="amazon.titan-embed-text-v2:0",
-            client=self.bedrock_client
+        self.llm = llm or ChatBedrockConverse(
+            model=Config.CHAT_MODEL_ID,
+            region_name=Config.AWS_REGION,
+            temperature=0.2,
+            max_tokens=2048,
         )
-        
-        self.llm = BedrockChat(
-            model_id="amazon.titan-text-lite-v1",
-            client=self.bedrock_client,
-            model_kwargs={
-                "temperature": 0.7,
-                "max_tokens": 4096,
-            }
-        )
-        
-        # Initialize vector store
-        try:
+
+        if vectorstore is not None:
+            self.vectorstore = vectorstore
+        else:
+            Database.ensure_ready()
             self.vectorstore = PGVector(
-                embedding_function=self.embeddings,
+                embeddings=self.embeddings,
                 collection_name=Config.COLLECTION_NAME,
-                connection_string=Database.get_connection_string(),
-                collection_metadata={"description": "PubMed papers collection"}
+                connection=Database.get_connection_string(),
+                use_jsonb=True,
             )
-        except Exception as e:
-            logging.error(f"Error initializing vector store: {str(e)}")
-            raise
         
         self.document_processor = DocumentProcessor()
         self.pubget_handler = PubgetHandler(
@@ -50,7 +41,7 @@ class PubmedLLM:
             api_key=Config.NCBI_API_KEY
         )
     
-    def download_and_index_papers(self, query: str, max_results: int = None):
+    def download_and_index_papers(self, query: str, max_results: int | None = None):
         """Download papers from PubMed and index them"""
         if not query:
             raise ValueError("Query must not be empty")
@@ -66,12 +57,14 @@ class PubmedLLM:
             xml_files = self._get_xml_files(data_dir)
             
             # Index the downloaded papers
-            self.index_documents(xml_files)
+            indexed_chunks = self.index_documents(xml_files)
+            if indexed_chunks == 0:
+                raise RuntimeError("Articles were downloaded, but no text could be indexed")
             
             return len(xml_files)
             
         except Exception as e:
-            logging.error(f"Error in download_and_index_papers: {str(e)}")
+            logger.error("Error in download_and_index_papers: %s", e)
             raise
 
     def _get_xml_files(self, data_dir):
@@ -83,25 +76,25 @@ class PubmedLLM:
                     xml_files.append(os.path.join(root, file))
         return xml_files
 
-    def index_documents(self, file_paths):
+    def index_documents(self, file_paths) -> int:
         """Index documents into the vector store"""
+        indexed = 0
         for file_path in file_paths:
-            logging.info(f"Processing {file_path}")
+            logger.info("Processing %s", file_path)
             try:
                 docs = self.document_processor.process_file(file_path)
-                
                 if docs:
-                    texts = [doc.page_content for doc in docs]
-                    metadatas = [doc.metadata for doc in docs]
-                    ids = [hashlib.sha256(text.encode()).hexdigest() for text in texts]
-                    
-                    self.vectorstore.add_texts(
-                        texts=texts,
-                        metadatas=metadatas,
-                        ids=ids
-                    )
+                    ids = [
+                        hashlib.sha256(
+                            f"{file_path}:{chunk_index}:{doc.page_content}".encode("utf-8")
+                        ).hexdigest()
+                        for chunk_index, doc in enumerate(docs)
+                    ]
+                    self.vectorstore.add_documents(docs, ids=ids)
+                    indexed += len(docs)
             except Exception as e:
-                logging.error(f"Error processing file {file_path}: {str(e)}")
+                logger.error("Error processing file %s: %s", file_path, e)
+        return indexed
 
     def query(self, query_text):
         """Query the knowledge base"""
@@ -114,23 +107,32 @@ class PubmedLLM:
                 k=Config.MAX_DOCS_RETURNED
             )
             
-            context = "\n\n".join(doc.page_content[:1000] for doc in docs)  # Truncate each document to 1000 characters
-            
-            prompt = f"""Based on the following context from PubMed papers, please answer this query: {query_text}
-            
-            Context: {context}
-            
-            Please provide a detailed answer with specific references to the source material when possible.
-            
-            Answer:"""
-            
-            response = self.llm.predict(prompt)
+            if not docs:
+                return {"query": query_text, "result": "No relevant document was found.", "source_documents": []}
+
+            context_parts = []
+            for number, doc in enumerate(docs, start=1):
+                title = doc.metadata.get("title") or doc.metadata.get("source", "Unknown source")
+                context_parts.append(f"[Source {number}: {title}]\n{doc.page_content}")
+            context = "\n\n".join(context_parts)
+
+            messages = [
+                ("system", "You answer only from the supplied biomedical sources. Cite sources as [Source N]. If the evidence is insufficient, say so explicitly."),
+                ("human", f"Question: {query_text}\n\nSources:\n{context}"),
+            ]
+            response = self.llm.invoke(messages)
+            text = getattr(response, "text", None)
+            if isinstance(text, str) and text:
+                result = text
+            else:
+                content = getattr(response, "content", response)
+                result = content if isinstance(content, str) else str(content)
             
             return {
                 'query': query_text,
-                'result': response,
+                'result': result,
                 'source_documents': docs
             }
         except Exception as e:
-            logging.error(f"Error in query: {str(e)}")
+            logger.error("Error in query: %s", e)
             raise

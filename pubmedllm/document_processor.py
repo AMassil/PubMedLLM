@@ -1,130 +1,76 @@
-import hashlib
-from langchain_text_splitters import CharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredXMLLoader
+# pubmedllm/document_processor.py
 import logging
-from typing import List
-from pydantic import BaseModel
+from pathlib import Path
+import xml.etree.ElementTree as ET
+
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
+
 from pubmedllm.config import Config
 
 logger = logging.getLogger(__name__)
 
-class DocumentMetadata(BaseModel):
-    """Standardized document metadata model"""
-    pmid: str = "unknown"
-    source_file: str
-    chunk_index: int
-    total_chunks: int
-
 class DocumentProcessor:
     def __init__(self):
-        self.text_splitter = CharacterTextSplitter(
+        self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=Config.CHUNK_SIZE,
-            chunk_overlap=Config.CHUNK_OVERLAP
+            chunk_overlap=Config.CHUNK_OVERLAP,
+            separators=["\n\n", "\n", ". ", " ", ""],
         )
 
-    def process_file(self, file_path: str) -> List[dict]:
-        """
-        Process a document file (PDF or XML) into chunks with metadata
-        
-        Args:
-            file_path: Path to the document file
-            
-        Returns:
-            List of document chunks with metadata
-        """
+    def process_file(self, file_path: str) -> list[Document]:
+        path = Path(file_path)
         try:
-            if file_path.endswith('.pdf'):
-                return self._process_pdf(file_path)
-            elif file_path.endswith('.xml'):
-                return self._process_xml(file_path)
+            if path.suffix.lower() == ".pdf":
+                documents = self._process_pdf(path)
+            elif path.suffix.lower() == ".xml":
+                documents = self._process_xml(path)
             else:
                 raise ValueError(f"Unsupported file type: {file_path}. Only .pdf and .xml files are supported.")
+            return self.text_splitter.split_documents(documents)
         except Exception as e:
-            logger.error(f"Error processing {file_path}: {str(e)}")
+            logger.error("Error processing %s: %s", file_path, e)
             return []
 
-    def _process_pdf(self, file_path: str) -> List[dict]:
-        """Process a PDF document"""
-        loader = PyPDFLoader(file_path)
-        pages = loader.load()
-        chunks = self.text_splitter.split_documents(pages)
-        
-        processed_chunks = []
-        for i, chunk in enumerate(chunks):
-            metadata = DocumentMetadata(
-                source_file=file_path,
-                chunk_index=i,
-                total_chunks=len(chunks)
-            )
-            processed_chunks.append({
-                'content': chunk.page_content,
-                'metadata': metadata.dict()
-            })
-            
-        return processed_chunks
+    @staticmethod
+    def _process_pdf(file_path: Path) -> list[Document]:
+        reader = PdfReader(file_path)
+        documents = []
+        for page_number, page in enumerate(reader.pages, start=1):
+            content = page.extract_text() or ""
+            if content.strip():
+                documents.append(Document(
+                    page_content=content,
+                    metadata={"source": str(file_path), "page": page_number},
+                ))
+        return documents
 
-    def _process_xml(self, file_path: str) -> List[dict]:
-        """Process an XML document with PMID extraction"""
-        loader = UnstructuredXMLLoader(file_path)
-        docs = loader.load()
-        
-        # Extract PMID from XML
-        pmid = self._extract_pmid_from_file(file_path)
-        
-        chunks = self.text_splitter.split_documents(docs)
-        processed_chunks = []
-        
-        for i, chunk in enumerate(chunks):
-            metadata = DocumentMetadata(
-                pmid=pmid,
-                source_file=file_path,
-                chunk_index=i,
-                total_chunks=len(chunks)
-            )
-            processed_chunks.append({
-                'content': chunk.page_content,
-                'metadata': metadata.dict()
-            })
-            
-        return processed_chunks
+    @staticmethod
+    def _process_xml(file_path: Path) -> list[Document]:
+        root = ET.parse(file_path).getroot()
+        article = root.find(".//article") if root.tag != "article" else root
+        if article is None:
+            raise ValueError("No <article> element found")
 
-    def _extract_pmid_from_file(self, file_path: str) -> str:
-        """
-        Extract PMID from XML file content
-        
-        Args:
-            file_path: Path to the XML file
-            
-        Returns:
-            Extracted PMID or 'unknown' if not found
-        """
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                xml_content = f.read()
-                return self._extract_pmid_from_xml(xml_content)
-        except Exception as e:
-            logger.warning(f"Couldn't extract PMID from {file_path}: {str(e)}")
-            return "unknown"
+        def text(xpath: str) -> str:
+            element = article.find(xpath)
+            return " ".join("".join(element.itertext()).split()) if element is not None else ""
 
-    def _extract_pmid_from_xml(self, xml_content: str) -> str:
-        """
-        Extract PMID from XML content string
-        
-        Args:
-            xml_content: String containing XML content
-            
-        Returns:
-            Extracted PMID or 'unknown' if not found
-        """
-        try:
-            start_tag = '<article-id pub-id-type="pmid">'
-            end_tag = '</article-id>'
-            start = xml_content.find(start_tag)
-            if start == -1:
-                return "unknown"
-            start += len(start_tag)
-            end = xml_content.find(end_tag, start)
-            return xml_content[start:end].strip()
-        except Exception as e:
-            logger.warning(f"PMID extraction failed: {str(e)}")
-            return "unknown"
+        title = text(".//article-title")
+        abstract = text(".//abstract")
+        body = text(".//body")
+        content = "\n\n".join(part for part in (title, abstract, body) if part)
+        if not content:
+            raise ValueError("The article contains no extractable text")
+
+        pmcid = text(".//article-id[@pub-id-type='pmcid']") or text(
+            ".//article-id[@pub-id-type='pmc']"
+        )
+        pmid = text(".//article-id[@pub-id-type='pmid']")
+        return [Document(page_content=content, metadata={
+            "source": str(file_path),
+            "title": title,
+            "pmcid": pmcid,
+            "pmid": pmid,
+        })]

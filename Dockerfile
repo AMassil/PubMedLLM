@@ -18,5 +18,5 @@ COPY pubmedllm/ /app/pubmedllm/
 # Set Python path
 ENV PYTHONPATH=/app
 
-# Start an interactive shell instead of running main.py
-CMD ["bash"]
+# Display the available commands; use `docker compose run` to execute one.
+CMD ["python", "-m", "pubmedllm.main", "--help"]
